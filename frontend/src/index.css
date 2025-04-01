@@ -1,0 +1,88 @@
+body {
+  margin: 0;
+  font-family: 'Roboto', 'Helvetica', 'Arial', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background-color: #f9f9f9;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
+}
+
+.highlighted-term {
+  background-color: rgba(245, 138, 7, 0.2);
+  border-bottom: 2px solid #F58A07;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 2px;
+  transition: background-color 0.2s ease;
+}
+
+.highlighted-term:hover {
+  background-color: rgba(245, 138, 7, 0.3);
+}
+
+.term-legal {
+  background-color: rgba(208, 0, 0, 0.1);
+  border-bottom: 2px solid rgba(208, 0, 0, 0.7);
+}
+
+.term-payment {
+  background-color: rgba(0, 128, 0, 0.1);
+  border-bottom: 2px solid rgba(0, 128, 0, 0.7);
+}
+
+.term-medical {
+  background-color: rgba(0, 0, 208, 0.1);
+  border-bottom: 2px solid rgba(0, 0, 208, 0.7);
+}
+
+.term-policy {
+  background-color: rgba(128, 0, 128, 0.1);
+  border-bottom: 2px solid rgba(128, 0, 128, 0.7);
+}
+
+.term-process {
+  background-color: rgba(208, 128, 0, 0.1);
+  border-bottom: 2px solid rgba(208, 128, 0, 0.7);
+}
+
+.term-coverage {
+  background-color: rgba(0, 128, 128, 0.1);
+  border-bottom: 2px solid rgba(0, 128, 128, 0.7);
+}
+
+.term-benefit {
+  background-color: rgba(128, 128, 0, 0.1);
+  border-bottom: 2px solid rgba(128, 128, 0, 0.7);
+}
+
+.term-monetary {
+  background-color: rgba(0, 100, 0, 0.1);
+  border-bottom: 2px solid rgba(0, 100, 0, 0.7);
+}
+
+.term-time_period {
+  background-color: rgba(100, 100, 0, 0.1);
+  border-bottom: 2px solid rgba(100, 100, 0, 0.7);
+}
+
+.term-percentage {
+  background-color: rgba(0, 0, 100, 0.1);
+  border-bottom: 2px solid rgba(0, 0, 100, 0.7);
+}
+
+.term-legal_clause {
+  background-color: rgba(100, 0, 0, 0.1);
+  border-bottom: 2px solid rgba(100, 0, 0, 0.7);
+}
+
+.term-explanation {
+  margin-top: 16px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 8px;
+  background-color: #f5f5f5;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
