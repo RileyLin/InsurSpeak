@@ -37,6 +37,7 @@ const initialState = {
   error: null,
   currentDocument: null,
   isDocumentProcessed: false,
+  summary: null, // Summary data for the policy
 };
 
 const documentSlice = createSlice({
@@ -65,6 +66,7 @@ const documentSlice = createSlice({
         state.originalText = action.payload.original_text;
         state.terms = action.payload.terms;
         state.insuranceType = action.payload.insurance_type;
+        state.summary = action.payload.summary || null;
         state.isDocumentProcessed = true;
         state.currentDocument = {
           id: Date.now().toString(),

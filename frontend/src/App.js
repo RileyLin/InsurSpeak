@@ -6,6 +6,7 @@ import Footer from './components/Footer';
 import HomePage from './pages/HomePage';
 import DocumentPage from './pages/DocumentPage';
 import QuestionsPage from './pages/QuestionsPage';
+import SummaryPage from './pages/SummaryPage';
 
 function App() {
   return (
@@ -20,6 +21,7 @@ function App() {
           <Routes>
             <Route path="/" element={<HomePage />} />
             <Route path="/document" element={<DocumentPage />} />
+            <Route path="/summary" element={<SummaryPage />} />
             <Route path="/questions" element={<QuestionsPage />} />
           </Routes>
         </Container>

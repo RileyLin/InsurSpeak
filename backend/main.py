@@ -10,6 +10,7 @@ from document_processor import process_document, extract_text_from_pdf
 from term_identifier import identify_terms
 from explanation_generator import generate_explanations
 from question_answerer import answer_question, identify_question_type, extract_personal_context
+from summary_generator import generate_policy_summary
 
 app = FastAPI(
     title="InsurSpeak API",
@@ -48,17 +49,21 @@ async def process_document_endpoint(
         document_text = await extract_text_from_pdf(file)
     else:
         document_text = text_content
-    
+
     # Identify complex terms
     identified_terms = identify_terms(document_text, insurance_type)
-    
+
     # Generate explanations for identified terms
     terms_with_explanations = generate_explanations(identified_terms, insurance_type)
-    
+
+    # Generate structured policy summary
+    policy_summary = generate_policy_summary(document_text, insurance_type)
+
     return JSONResponse(content={
         "original_text": document_text,
         "terms": terms_with_explanations,
-        "insurance_type": insurance_type
+        "insurance_type": insurance_type,
+        "summary": policy_summary
     })
 
 @app.post("/ask-question")

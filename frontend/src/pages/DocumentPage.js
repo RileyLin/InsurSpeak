@@ -78,10 +78,10 @@ const DocumentPage = () => {
     
     // Dispatch the process document action
     const resultAction = await dispatch(processDocument(payload));
-    
-    // If processing was successful, navigate to questions page
+
+    // If processing was successful, navigate to summary page
     if (processDocument.fulfilled.match(resultAction)) {
-      navigate('/questions');
+      navigate('/summary');
     }
   };
 
@@ -112,8 +112,14 @@ const DocumentPage = () => {
               onChange={handleInsuranceTypeChange}
             >
               <MenuItem value="health">Health Insurance</MenuItem>
+              <MenuItem value="auto">Auto Insurance</MenuItem>
               <MenuItem value="life">Life Insurance</MenuItem>
               <MenuItem value="disability">Disability Insurance</MenuItem>
+              <MenuItem value="travel">Travel Insurance</MenuItem>
+              <MenuItem value="home">Home/Renters Insurance</MenuItem>
+              <MenuItem value="pet">Pet Insurance</MenuItem>
+              <MenuItem value="business">Business Insurance</MenuItem>
+              <MenuItem value="other">Other</MenuItem>
             </Select>
           </FormControl>
         </Box>
