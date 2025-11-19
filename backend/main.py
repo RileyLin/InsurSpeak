@@ -6,7 +6,9 @@ import json
 from typing import Optional, List, Dict, Any
 import uvicorn
 
-from document_processor import process_document, extract_text_from_pdf
+from document_processor import (
+    process_document, extract_text_from_pdf, detect_insurance_type, extract_entities
+)
 from term_identifier import identify_terms
 from explanation_generator import generate_explanations
 from question_answerer import answer_question, identify_question_type, extract_personal_context
@@ -43,12 +45,21 @@ async def process_document_endpoint(
     """
     if not file and not text_content:
         raise HTTPException(status_code=400, detail="Either file or text_content must be provided")
-    
-    # Process the document
+
+    # Extract text and tables
+    tables = []
     if file:
-        document_text = await extract_text_from_pdf(file)
+        document_text, tables = await extract_text_from_pdf(file)
     else:
         document_text = text_content
+
+    # Auto-detect insurance type if not specified or if "other"
+    if not insurance_type or insurance_type == "other":
+        insurance_type = detect_insurance_type(document_text)
+        print(f"Auto-detected insurance type: {insurance_type}")
+
+    # Extract structured entities (policy numbers, dates, amounts, etc.)
+    entities = extract_entities(document_text)
 
     # Identify complex terms
     identified_terms = identify_terms(document_text, insurance_type)
@@ -63,7 +74,12 @@ async def process_document_endpoint(
         "original_text": document_text,
         "terms": terms_with_explanations,
         "insurance_type": insurance_type,
-        "summary": policy_summary
+        "summary": policy_summary,
+        "entities": entities,
+        "tables": {
+            "count": len(tables),
+            "tables": tables[:5]  # Return first 5 tables to avoid huge payloads
+        }
     })
 
 @app.post("/ask-question")
