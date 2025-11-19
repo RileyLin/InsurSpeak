@@ -214,19 +214,23 @@ async def get_current_user_profile(current_user: Dict[str, Any] = Depends(get_cu
 async def process_document_endpoint(
     file: Optional[UploadFile] = File(None),
     text_content: Optional[str] = Form(None),
-    insurance_type: str = Form(...)
+    insurance_type: str = Form(...),
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user_optional)
 ):
     """
     Process an insurance document (PDF upload or text input)
-    and identify complex terms with explanations
+    and identify complex terms with explanations.
+    Saves to database if user is authenticated.
     """
     if not file and not text_content:
         raise HTTPException(status_code=400, detail="Either file or text_content must be provided")
 
     # Extract text and tables
     tables = []
+    filename = None
     if file:
         document_text, tables = await extract_text_from_pdf(file)
+        filename = file.filename
     else:
         document_text = text_content
 
@@ -247,6 +251,57 @@ async def process_document_endpoint(
     # Generate structured policy summary
     policy_summary = generate_policy_summary(document_text, insurance_type)
 
+    # Save to database if user is authenticated
+    policy_id = None
+    if current_user:
+        policies = get_policies_collection()
+        if policies is not None:
+            # Check freemium limits
+            user_policy_count = current_user.get("policy_count", 0)
+            subscription_tier = current_user.get("subscription_tier", "free")
+
+            # Free tier: max 2 policies
+            if subscription_tier == "free" and user_policy_count >= 2:
+                # Still process but don't save, return warning
+                return JSONResponse(content={
+                    "original_text": document_text,
+                    "terms": terms_with_explanations,
+                    "insurance_type": insurance_type,
+                    "summary": policy_summary,
+                    "entities": entities,
+                    "tables": {
+                        "count": len(tables),
+                        "tables": tables[:5]
+                    },
+                    "warning": "You've reached your free policy limit (2 policies). Upgrade to save more policies.",
+                    "policy_id": None
+                })
+
+            # Save policy
+            policy_doc = {
+                "user_id": current_user["_id"],
+                "insurance_type": insurance_type,
+                "filename": filename or "Text Input",
+                "original_text": document_text,
+                "summary": policy_summary,
+                "entities": entities,
+                "terms": terms_with_explanations,
+                "status": "active",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+
+            result = policies.insert_one(policy_doc)
+            policy_id = str(result.inserted_id)
+
+            # Update user's policy count
+            users = get_users_collection()
+            if users:
+                users.update_one(
+                    {"_id": ObjectId(current_user["_id"])},
+                    {"$inc": {"policy_count": 1}, "$set": {"updated_at": datetime.utcnow()}}
+                )
+
     return JSONResponse(content={
         "original_text": document_text,
         "terms": terms_with_explanations,
@@ -255,9 +310,179 @@ async def process_document_endpoint(
         "entities": entities,
         "tables": {
             "count": len(tables),
-            "tables": tables[:5]  # Return first 5 tables to avoid huge payloads
-        }
+            "tables": tables[:5]
+        },
+        "policy_id": policy_id,
+        "saved": policy_id is not None
     })
+
+# ============= POLICY MANAGEMENT ENDPOINTS =============
+
+@app.get("/policies")
+async def get_user_policies(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    status: Optional[str] = None
+):
+    """
+    Get all policies for the current user
+
+    Query params:
+        status: Filter by status (active, archived)
+    """
+    policies = get_policies_collection()
+    if policies is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+
+    # Build query
+    query = {"user_id": current_user["_id"]}
+    if status:
+        query["status"] = status
+
+    # Get policies sorted by created_at (newest first)
+    user_policies = list(policies.find(query).sort("created_at", -1))
+
+    # Convert ObjectId to string and format response
+    for policy in user_policies:
+        policy["_id"] = str(policy["_id"])
+        policy["user_id"] = str(policy["user_id"])
+        # Remove large fields from list view
+        if "original_text" in policy:
+            del policy["original_text"]
+        if "terms" in policy:
+            policy["terms_count"] = len(policy["terms"])
+            del policy["terms"]
+
+    return {"policies": user_policies, "count": len(user_policies)}
+
+
+@app.get("/policies/{policy_id}")
+async def get_policy_by_id(
+    policy_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Get a specific policy by ID
+    """
+    policies = get_policies_collection()
+    if policies is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+
+    try:
+        policy = policies.find_one({
+            "_id": ObjectId(policy_id),
+            "user_id": current_user["_id"]
+        })
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid policy ID"
+        )
+
+    if not policy:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Policy not found"
+        )
+
+    # Convert ObjectId to string
+    policy["_id"] = str(policy["_id"])
+    policy["user_id"] = str(policy["user_id"])
+
+    return policy
+
+
+@app.delete("/policies/{policy_id}")
+async def delete_policy(
+    policy_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Delete a policy
+    """
+    policies = get_policies_collection()
+    if policies is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+
+    try:
+        result = policies.delete_one({
+            "_id": ObjectId(policy_id),
+            "user_id": current_user["_id"]
+        })
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid policy ID"
+        )
+
+    if result.deleted_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Policy not found"
+        )
+
+    # Update user's policy count
+    users = get_users_collection()
+    if users:
+        users.update_one(
+            {"_id": ObjectId(current_user["_id"])},
+            {"$inc": {"policy_count": -1}, "$set": {"updated_at": datetime.utcnow()}}
+        )
+
+    return {"message": "Policy deleted successfully"}
+
+
+@app.put("/policies/{policy_id}/status")
+async def update_policy_status(
+    policy_id: str,
+    new_status: str = Form(...),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Update policy status (active, archived)
+    """
+    if new_status not in ["active", "archived"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be 'active' or 'archived'"
+        )
+
+    policies = get_policies_collection()
+    if policies is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+
+    try:
+        result = policies.update_one(
+            {"_id": ObjectId(policy_id), "user_id": current_user["_id"]},
+            {"$set": {"status": new_status, "updated_at": datetime.utcnow()}}
+        )
+    except:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid policy ID"
+        )
+
+    if result.matched_count == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Policy not found"
+        )
+
+    return {"message": f"Policy status updated to {new_status}"}
+
+
+# ============= Q&A ENDPOINTS =============
 
 @app.post("/ask-question")
 async def ask_question_endpoint(
