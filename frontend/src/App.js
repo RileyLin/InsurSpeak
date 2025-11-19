@@ -7,14 +7,15 @@ import HomePage from './pages/HomePage';
 import DocumentPage from './pages/DocumentPage';
 import QuestionsPage from './pages/QuestionsPage';
 import SummaryPage from './pages/SummaryPage';
+import ClaimsPage from './pages/ClaimsPage';
 
 function App() {
   return (
     <Router>
-      <Box sx={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        minHeight: '100vh' 
+      <Box sx={{
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: '100vh'
       }}>
         <Header />
         <Container component="main" sx={{ flexGrow: 1, py: 4 }}>
@@ -23,6 +24,7 @@ function App() {
             <Route path="/document" element={<DocumentPage />} />
             <Route path="/summary" element={<SummaryPage />} />
             <Route path="/questions" element={<QuestionsPage />} />
+            <Route path="/claims" element={<ClaimsPage />} />
           </Routes>
         </Container>
         <Footer />

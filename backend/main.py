@@ -15,13 +15,14 @@ from term_identifier import identify_terms
 from explanation_generator import generate_explanations
 from question_answerer import answer_question, identify_question_type, extract_personal_context
 from summary_generator import generate_policy_summary
+from claims_engine import analyze_situation
 from auth import (
     UserCreate, UserLogin, Token, get_password_hash, verify_password,
     create_access_token, get_current_user, get_current_user_optional,
     validate_password_strength
 )
 from database import (
-    init_database, get_users_collection, get_policies_collection,
+    init_database, get_users_collection, get_policies_collection, get_claims_collection,
     close_database
 )
 
@@ -505,6 +506,101 @@ async def ask_question_endpoint(
         "question_type": answer_data.get("question_type", "general"),
         "personal_context": answer_data.get("personal_context", {})
     })
+
+
+# ============= CLAIMS RECOMMENDATION ENDPOINTS =============
+
+@app.post("/analyze-situation")
+async def analyze_situation_endpoint(
+    situation: str = Form(...),
+    incident_date: Optional[str] = Form(None),
+    location: Optional[str] = Form(None),
+    estimated_cost: Optional[str] = Form(None),
+    category: Optional[str] = Form(None),
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Analyze a user's situation and recommend claims from their policies
+
+    THE CORE FEATURE: Describe what happened, get claim recommendations!
+    """
+    # Get user's active policies
+    policies = get_policies_collection()
+    if policies is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+
+    user_policies = list(policies.find({
+        "user_id": current_user["_id"],
+        "status": "active"
+    }))
+
+    if not user_policies:
+        return JSONResponse(content={
+            "can_file_claims": False,
+            "message": "You don't have any active policies. Please upload your insurance policies first.",
+            "recommendations": [],
+            "situation": situation
+        })
+
+    # Prepare incident details
+    incident_details = None
+    if any([incident_date, location, estimated_cost, category]):
+        incident_details = {
+            "date": incident_date,
+            "location": location,
+            "cost": estimated_cost,
+            "category": category
+        }
+
+    # Analyze situation and get recommendations
+    analysis = analyze_situation(situation, user_policies, incident_details)
+
+    # Save to claims collection for history
+    claims_col = get_claims_collection()
+    if claims_col:
+        claim_record = {
+            "user_id": current_user["_id"],
+            "situation": situation,
+            "incident_details": incident_details,
+            "analysis": analysis,
+            "policies_checked": [str(p["_id"]) for p in user_policies],
+            "created_at": datetime.utcnow(),
+            "status": "analyzed"  # analyzed, filed, approved, denied
+        }
+        claims_col.insert_one(claim_record)
+
+    return JSONResponse(content=analysis)
+
+
+@app.get("/claims-history")
+async def get_claims_history(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+):
+    """
+    Get user's claims analysis history
+    """
+    claims_col = get_claims_collection()
+    if claims_col is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available"
+        )
+
+    # Get claims sorted by newest first
+    claims = list(claims_col.find({
+        "user_id": current_user["_id"]
+    }).sort("created_at", -1).limit(50))
+
+    # Format response
+    for claim in claims:
+        claim["_id"] = str(claim["_id"])
+        claim["user_id"] = str(claim["user_id"])
+
+    return {"claims": claims, "count": len(claims)}
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
