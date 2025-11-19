@@ -9,78 +9,135 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-def answer_question(question: str, document_text: str, insurance_type: str) -> str:
+def answer_question(question: str, document_text: str, insurance_type: str) -> Dict[str, Any]:
     """
     Generate an answer to a user's question about their insurance policy
+
+    Returns:
+        Dictionary with answer, citations, and metadata
     """
     try:
         # Identify the type of question (coverage, recommendation, interpretation)
         question_type = identify_question_type(question)
-        
+
         # Extract personal context from the question
         personal_context = extract_personal_context(question)
-        
+
+        # Find relevant sections in the document
+        relevant_sections = find_relevant_sections(question, document_text)
+
         # For real OpenAI API implementation
         api_key = os.getenv("OPENAI_API_KEY")
         if api_key:
-            return call_openai_api(question, document_text, insurance_type, question_type, personal_context)
+            answer_data = call_openai_api(
+                question, document_text, insurance_type,
+                question_type, personal_context, relevant_sections
+            )
         else:
             # Fallback to mock if no API key
-            return mock_answer(question, document_text, insurance_type, question_type)
-            
+            answer_data = mock_answer_with_citations(
+                question, document_text, insurance_type,
+                question_type, relevant_sections
+            )
+
+        # Add question metadata
+        answer_data["question_type"] = question_type
+        answer_data["personal_context"] = personal_context
+
+        return answer_data
+
     except Exception as e:
         print(f"Error generating answer: {e}")
         import traceback
         traceback.print_exc()
-        return "I'm sorry, I couldn't process your question. Please try again or rephrase your question."
+        return {
+            "answer": "I'm sorry, I couldn't process your question. Please try again or rephrase your question.",
+            "citations": [],
+            "confidence": "low",
+            "question_type": "unknown",
+            "personal_context": {}
+        }
 
-def call_openai_api(question: str, document_text: str, insurance_type: str, question_type: str, personal_context: Dict[str, Any]) -> str:
+def call_openai_api(
+    question: str,
+    document_text: str,
+    insurance_type: str,
+    question_type: str,
+    personal_context: Dict[str, Any],
+    relevant_sections: List[Dict[str, str]]
+) -> Dict[str, Any]:
     """
-    Call the OpenAI API to generate an answer
+    Call the OpenAI API to generate an answer with citations
     """
     # Prepare the prompt
-    prompt = create_question_prompt(question, document_text, insurance_type, question_type, personal_context)
-    
+    prompt = create_question_prompt(
+        question, document_text, insurance_type,
+        question_type, personal_context, relevant_sections
+    )
+
     # API endpoint
     api_url = "https://api.openai.com/v1/chat/completions"
-    
+
     # Get API key from environment
     api_key = os.getenv("OPENAI_API_KEY")
-    
+
     # Headers with proper authentication
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {api_key}"
     }
-    
+
     # Request body
     data = {
         "model": "gpt-4o",
         "messages": [
-            {"role": "system", "content": "You are an insurance expert assistant that explains complex insurance concepts in simple terms."},
+            {
+                "role": "system",
+                "content": "You are an insurance expert assistant that explains complex insurance concepts in simple terms. Always cite specific sections or quotes from the policy when answering."
+            },
             {"role": "user", "content": prompt}
         ],
-        "temperature": 0.5,
-        "max_tokens": 500
+        "temperature": 0.3,
+        "max_tokens": 700
     }
-    
+
     try:
         print(f"Calling OpenAI API with model: gpt-4o")
         response = requests.post(api_url, headers=headers, json=data)
-        
+
         # Check for errors
         response.raise_for_status()
-        
+
         # Parse the response
         response_data = response.json()
-        
+
         # Extract the generated text
         if "choices" in response_data and len(response_data["choices"]) > 0:
             answer = response_data["choices"][0]["message"]["content"]
-            return answer
+
+            # Extract citations from relevant sections
+            citations = []
+            for section in relevant_sections[:3]:  # Top 3 most relevant
+                citations.append({
+                    "section": section["title"],
+                    "text": section["snippet"][:200] + "..." if len(section["snippet"]) > 200 else section["snippet"],
+                    "relevance": section.get("score", 0)
+                })
+
+            return {
+                "answer": answer,
+                "citations": citations,
+                "confidence": "high" if citations else "medium",
+                "sources": [s["title"] for s in relevant_sections[:3]]
+            }
         else:
-            return "No answer was generated. Please try again."
-    
+            return {
+                "answer": "No answer was generated. Please try again.",
+                "citations": [],
+                "confidence": "low",
+                "sources": []
+            }
+
     except requests.exceptions.HTTPError as http_err:
         error_message = f"HTTP error: {http_err}"
         try:
@@ -90,31 +147,54 @@ def call_openai_api(question: str, document_text: str, insurance_type: str, ques
         except:
             pass
         print(error_message)
-        return f"Error: {error_message}"
-    
+        return {
+            "answer": f"Error: {error_message}",
+            "citations": [],
+            "confidence": "low",
+            "sources": []
+        }
+
     except Exception as e:
         print(f"Error calling OpenAI API: {e}")
-        return f"Error: {str(e)}"
+        return {
+            "answer": f"Error: {str(e)}",
+            "citations": [],
+            "confidence": "low",
+            "sources": []
+        }
 
-def create_question_prompt(question: str, document_text: str, insurance_type: str, question_type: str, personal_context: Dict[str, Any]) -> str:
+def create_question_prompt(
+    question: str,
+    document_text: str,
+    insurance_type: str,
+    question_type: str,
+    personal_context: Dict[str, Any],
+    relevant_sections: List[Dict[str, str]]
+) -> str:
     """
     Create a prompt for the LLM to answer the question based on the document and question type
     """
-    # Truncate document text if it's too long
-    max_text_length = 4000  # Adjust based on token limits
-    truncated_text = document_text[:max_text_length] if len(document_text) > max_text_length else document_text
-    
+    # Use relevant sections if available, otherwise use truncated document
+    if relevant_sections:
+        context_text = "\n\n".join([
+            f"Section: {s['title']}\n{s['snippet']}"
+            for s in relevant_sections[:5]  # Top 5 most relevant sections
+        ])
+    else:
+        max_text_length = 4000
+        context_text = document_text[:max_text_length] if len(document_text) > max_text_length else document_text
+
     base_prompt = f"""
     You are an insurance expert assistant helping a user understand their insurance policy. Your goal is to explain complex insurance concepts in simple terms.
 
     User's insurance policy type: {insurance_type}
-    
-    Relevant policy text:
-    {truncated_text}
+
+    Relevant policy sections:
+    {context_text}
 
     User question: {question}
     """
-    
+
     # Add personal context to the prompt
     if personal_context:
         base_prompt += f"""
@@ -163,14 +243,125 @@ def create_question_prompt(question: str, document_text: str, insurance_type: st
     Provide a clear, straightforward answer that:
     1. Directly addresses the user's question
     2. Uses simple language (aim for 8th-grade reading level)
-    3. Explains any technical terms you need to use
-    4. Does NOT provide legal advice or definitive coverage determinations
-    5. Includes appropriate disclaimers when the answer requires interpretation
+    3. Cites specific sections or quotes from the policy
+    4. Explains any technical terms you need to use
+    5. Does NOT provide legal advice or definitive coverage determinations
+    6. Includes appropriate disclaimers when the answer requires interpretation
+
+    Format your answer with:
+    - A clear, direct answer to the question
+    - Specific quotes or references from the policy sections above
+    - Explanation in simple terms
 
     If the answer cannot be determined from the policy text provided, explain what additional information would be needed.
     """
-    
+
     return base_prompt
+
+
+def find_relevant_sections(question: str, document_text: str) -> List[Dict[str, str]]:
+    """
+    Find sections of the document most relevant to the question
+
+    Returns:
+        List of dictionaries with section title, snippet, and relevance score
+    """
+    # Extract keywords from question
+    question_keywords = extract_keywords(question)
+
+    # Split document into paragraphs
+    paragraphs = document_text.split('\n\n')
+
+    # Score each paragraph based on keyword matches
+    scored_paragraphs = []
+    for i, para in enumerate(paragraphs):
+        if len(para.strip()) < 50:  # Skip very short paragraphs
+            continue
+
+        # Count keyword matches (case-insensitive)
+        para_lower = para.lower()
+        score = 0
+        for keyword in question_keywords:
+            count = para_lower.count(keyword.lower())
+            score += count * 2  # Weight each keyword match
+
+        # Boost score for section headers
+        common_headers = [
+            "coverage", "benefits", "exclusions", "limitations",
+            "deductible", "copay", "claims", "out-of-pocket"
+        ]
+        for header in common_headers:
+            if header in para_lower[:100]:  # Check first 100 chars
+                score += 3
+
+        if score > 0:
+            # Extract section title (first line if it looks like a header)
+            lines = para.split('\n')
+            title = lines[0].strip() if lines[0].isupper() or len(lines[0]) < 50 else "Policy Text"
+
+            scored_paragraphs.append({
+                "title": title[:100],
+                "snippet": para.strip(),
+                "score": score,
+                "position": i
+            })
+
+    # Sort by score (descending)
+    scored_paragraphs.sort(key=lambda x: x["score"], reverse=True)
+
+    return scored_paragraphs[:10]  # Return top 10 most relevant sections
+
+
+def extract_keywords(text: str) -> List[str]:
+    """Extract keywords from a question"""
+    # Remove common words
+    stop_words = {
+        "the", "is", "are", "was", "were", "what", "when", "where", "who",
+        "which", "how", "why", "does", "do", "did", "can", "could", "would",
+        "should", "will", "a", "an", "and", "or", "but", "in", "on", "at",
+        "to", "for", "of", "with", "by", "from", "as", "this", "that",
+        "my", "i", "me", "you", "your", "it", "its", "be", "been", "have",
+        "has", "had", "if", "so", "than", "then"
+    }
+
+    # Split and clean
+    words = re.findall(r'\b\w+\b', text.lower())
+
+    # Filter out stop words and short words
+    keywords = [w for w in words if w not in stop_words and len(w) > 3]
+
+    # Return unique keywords
+    return list(set(keywords))
+
+
+def mock_answer_with_citations(
+    question: str,
+    document_text: str,
+    insurance_type: str,
+    question_type: str,
+    relevant_sections: List[Dict[str, str]]
+) -> Dict[str, Any]:
+    """
+    Generate a mock answer with citations for testing
+    """
+    # Get the basic mock answer
+    answer = mock_answer(question, document_text, insurance_type, question_type)
+
+    # Create mock citations from relevant sections
+    citations = []
+    for section in relevant_sections[:2]:  # Top 2 sections
+        citations.append({
+            "section": section["title"],
+            "text": section["snippet"][:200] + "..." if len(section["snippet"]) > 200 else section["snippet"],
+            "relevance": section.get("score", 0)
+        })
+
+    return {
+        "answer": answer,
+        "citations": citations,
+        "confidence": "medium" if citations else "low",
+        "sources": [s["title"] for s in relevant_sections[:2]]
+    }
 
 def mock_answer(question: str, document_text: str, insurance_type: str, question_type: str) -> str:
     """

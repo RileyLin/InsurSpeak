@@ -89,22 +89,19 @@ async def ask_question_endpoint(
     insurance_type: str = Form(...)
 ):
     """
-    Answer a specific question about an insurance policy
+    Answer a specific question about an insurance policy with citations and context
     """
-    # Identify the type of question (coverage, recommendation, etc.)
-    question_type = identify_question_type(question)
-    
-    # Extract any personal context from the question
-    personal_context = extract_personal_context(question)
-    
-    # Get the answer
-    answer = answer_question(question, document_text, insurance_type)
-    
+    # Get the answer with citations and metadata
+    answer_data = answer_question(question, document_text, insurance_type)
+
     return JSONResponse(content={
         "question": question,
-        "answer": answer,
-        "question_type": question_type,
-        "personal_context": personal_context
+        "answer": answer_data.get("answer", ""),
+        "citations": answer_data.get("citations", []),
+        "confidence": answer_data.get("confidence", "medium"),
+        "sources": answer_data.get("sources", []),
+        "question_type": answer_data.get("question_type", "general"),
+        "personal_context": answer_data.get("personal_context", {})
     })
 
 if __name__ == "__main__":
